@@ -1,0 +1,8 @@
+# Rust
+converter/target/
+
+# Node
+web/node_modules/
+web/dist/
+
+# Wasm build artifacts tracked in src/wasm are intentional

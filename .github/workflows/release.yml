@@ -1,0 +1,82 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            converter/target
+          key: cargo-${{ hashFiles('converter/Cargo.lock') }}
+          restore-keys: cargo-
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build WASM module
+        working-directory: converter
+        run: wasm-pack build --target web --out-dir ../web/src/wasm
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install npm dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build web app (relative base for local serving)
+        working-directory: web
+        run: npx tsc && npx vite build --base ./
+
+      - name: Package as zip
+        run: |
+          cd web/dist
+          zip -r ../../eden-to-mc-web-${{ github.ref_name }}.zip .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: eden-to-mc-web-${{ github.ref_name }}.zip
+          body: |
+            ## Eden → Minecraft Converter ${{ github.ref_name }}
+
+            ### Option A — Live web app (no download needed)
+            Visit **https://hagg3.github.io/EdenToMC/** in any modern browser.
+
+            ### Option B — Run locally from this release
+            1. Download `eden-to-mc-web-${{ github.ref_name }}.zip` below and extract it.
+            2. Serve the folder over HTTP (required for WASM — `file://` won't work):
+               ```bash
+               # Python (built-in)
+               cd eden-to-mc-web-${{ github.ref_name }}
+               python3 -m http.server 8080
+               # then open http://localhost:8080
+               ```
+               Or install `npx serve` and run `npx serve .`
+            3. Drop your `.eden` file, convert, download the world ZIP.
+
+            ### Installing the Minecraft world
+            Extract the downloaded ZIP → copy `level.dat` and `region/` into a new folder inside `~/.minecraft/saves/` → launch Minecraft 1.12.2.

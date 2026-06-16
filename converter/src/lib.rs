@@ -3,6 +3,9 @@ mod eden;
 mod block_map;
 mod anvil;
 mod level_dat;
+mod noise;
+mod terrain;
+mod eden_writer;
 
 use wasm_bindgen::prelude::*;
 use std::io::Write;
@@ -101,4 +104,60 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
 pub fn default_mapping_json() -> String {
     let m = block_map::default_mapping();
     serde_json::to_string(&m).unwrap_or_default()
+}
+
+/// Generate a procedural Eden world and return raw .eden file bytes.
+/// `params_json` must be a JSON object with fields:
+///   width (u32), depth (u32), seed (u32),
+///   base_height (i32, optional, default 30),
+///   water_amnt (u32 1-5, optional, default 3)
+/// Returns JSON: { eden: <base64 eden bytes>, stats: { ... } }
+#[wasm_bindgen]
+pub fn generate_world(params_json: &str) -> Result<String, JsValue> {
+    let params: terrain::TerrainParams = serde_json::from_str(params_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid params: {}", e)))?;
+
+    let world = terrain::generate(&params)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let meta_json = serde_json::json!({
+        "spawn_x": world.meta.spawn_x,
+        "spawn_y": world.meta.spawn_y,
+        "spawn_z": world.meta.spawn_z,
+        "trees_placed": world.meta.trees_placed,
+        "flowers_placed": world.meta.flowers_placed,
+        "caves_carved": world.meta.caves_carved,
+        "min_height": world.meta.min_height,
+        "max_height": world.meta.max_height,
+        "cols_x": world.meta.cols_x,
+        "cols_z": world.meta.cols_z,
+    });
+
+    let eden_bytes = eden_writer::write_eden_file(&world, &params);
+
+    // Base64-encode the Eden bytes for safe JSON transport
+    let eden_b64 = base64_encode(&eden_bytes);
+
+    let result = serde_json::json!({
+        "eden": eden_b64,
+        "stats": meta_json,
+    });
+
+    Ok(result.to_string())
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let combined = (b0 << 16) | (b1 << 8) | b2;
+        out.push(CHARS[((combined >> 18) & 0x3F) as usize] as char);
+        out.push(CHARS[((combined >> 12) & 0x3F) as usize] as char);
+        out.push(if chunk.len() > 1 { CHARS[((combined >> 6) & 0x3F) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { CHARS[(combined & 0x3F) as usize] as char } else { '=' });
+    }
+    out
 }

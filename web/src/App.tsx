@@ -7,7 +7,7 @@ type Phase = "idle" | "converting" | "done" | "error";
 type Tab = "convert" | "generate";
 
 type WasmModule = {
-  convert: (bytes: Uint8Array, mapping: string | undefined) => Uint8Array<ArrayBuffer>;
+  convert: (bytes: Uint8Array, mapping?: string | null) => Uint8Array<ArrayBufferLike>;
   generate_world: (params: string) => string;
 };
 
@@ -77,7 +77,7 @@ export default function App() {
       setStatus("Converting — this may take a moment for large worlds…");
       await new Promise(r => setTimeout(r, 0));
       const result = wasmRef.current.convert(bytes, JSON.stringify(mapping));
-      const blob = new Blob([result], { type: "application/zip" });
+      const blob = new Blob([new Uint8Array(result)], { type: "application/zip" });
       setZipBlob(blob); setPhase("done");
       setStatus(`Done! ${(blob.size / 1024).toFixed(1)} KB zip ready.`);
     } catch (e) {
@@ -127,7 +127,7 @@ export default function App() {
       const bytes = new Uint8Array(await edenBlob.arrayBuffer());
       await new Promise(r => setTimeout(r, 0));
       const result = wasmRef.current.convert(bytes, JSON.stringify(mapping));
-      const zip = new Blob([result], { type: "application/zip" });
+      const zip = new Blob([new Uint8Array(result)], { type: "application/zip" });
       setGenZipBlob(zip);
       setGenStatus(`Minecraft world ready — ${(zip.size / 1024).toFixed(1)} KB zip.`);
     } catch (e) {

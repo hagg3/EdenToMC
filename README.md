@@ -1,21 +1,21 @@
 # Eden Tools — Eden ↔ Minecraft Converter & World Generator
 
-Convert [Eden World Builder](https://www.eden-game.com/) worlds into playable Minecraft Java Edition worlds, or generate brand-new procedural worlds — entirely in your browser.
+Convert [Eden World Builder](https://www.eden-game.com/) worlds into playable Minecraft Java Edition worlds, or generate brand-new procedural worlds all within your browser.
 
 [![Live App](https://img.shields.io/badge/Open_Web_App-2563eb?style=for-the-badge)](https://hagg3.github.io/EdenToMC/)
 
 ---
 
-> **⚠️ Experimental software — expect bugs**
+> **⚠️ Experimental software: expect bugs**
 >
-> All features in this project — including the original Eden→Minecraft converter, the new procedural terrain generator, and the Minecraft→Eden importer — are **experimental and known to be buggy**. Converted worlds may have missing blocks, incorrect terrain, broken spawns, or other artefacts. Terrain-generated worlds are particularly rough and should be considered a proof of concept. Use at your own risk and always keep a backup of your original `.eden` files.
+> All features in this project, including the original Eden→Minecraft converter, the new procedural terrain generator, and the Minecraft to Eden importer are **experimental and known to be buggy**. Converted worlds may have missing blocks, incorrect terrain, broken spawns, or other artefacts. Terrain-generated worlds are particularly rough and should be considered a proof of concept. Use at your own risk and always keep a backup of your original `.eden` files.
 
 ---
 
 ## Features
 
 ### Convert `.eden` → Minecraft
-Drop an Eden World Builder `.eden` file and download a ready-to-play Minecraft 1.12 world ZIP. Runs 100% in your browser — nothing is uploaded.
+Drop an Eden World Builder `.eden` file and download a ready-to-play Minecraft 1.12 world ZIP. Runs entirley in your browser and nothing is uploaded anywhere.
 
 ### Generate a procedural world *(new, experimental)*
 Create a fresh world from noise-based terrain generation directly in the browser. Tune the size, seed, base height, and water coverage, then download the result as a `.eden` file or convert it straight to a Minecraft ZIP.

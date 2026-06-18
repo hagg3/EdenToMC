@@ -61,6 +61,12 @@ pub fn write_eden_file(world: &TerrainWorld, params: &TerrainParams) -> Vec<u8> 
     buf[40..40 + name.len()].copy_from_slice(name);
     write_i32_le(&mut buf, 90, 4); // FILE_VERSION 4
 
+    // Sky color 6 = light blue sky → game renders grass as green.
+    // Without this, all bytes are 0 → majority-vote returns 0 → pink/magenta grass.
+    for i in 130..146 {
+        buf[i] = 6;
+    }
+
     // --- Column data ---
     let mut col_idx = 0usize;
     let mut dir_entries: Vec<(i32, i32, u64)> = Vec::with_capacity(num_cols);

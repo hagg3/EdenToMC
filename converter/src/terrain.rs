@@ -23,7 +23,7 @@ pub struct TerrainParams {
     pub water_amnt: u32,
 }
 
-fn default_base_height() -> i32 { 30 }
+fn default_base_height() -> i32 { 36 }
 fn default_water_amnt() -> u32 { 3 }
 
 pub struct TerrainMeta {

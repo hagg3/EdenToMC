@@ -1,7 +1,7 @@
 use crate::nbt::{NbtBuf, zlib_compress};
 
 /// Generate a minimal level.dat for Minecraft 1.12.2 (DataVersion 1343).
-pub fn build_level_dat(world_name: &str, seed: i32, spawn_x: i32, spawn_z: i32) -> Vec<u8> {
+pub fn build_level_dat(world_name: &str, seed: i32, spawn_x: i32, spawn_y: i32, spawn_z: i32) -> Vec<u8> {
     let mut buf = NbtBuf::new();
     buf.begin_compound(""); // root unnamed compound
     buf.begin_compound("Data");
@@ -10,9 +10,9 @@ pub fn build_level_dat(world_name: &str, seed: i32, spawn_x: i32, spawn_z: i32) 
     buf.int("version", 19133);    // Anvil
     buf.byte("initialized", 1);
     buf.string("LevelName", world_name);
-    buf.string("generatorName", "flat");
+    buf.string("generatorName", "default");
     buf.string("generatorOptions", "");
-    buf.int("generatorVersion", 0);
+    buf.int("generatorVersion", 1);
     buf.long("RandomSeed", seed as i64);
     buf.byte("MapFeatures", 0);
     buf.long("LastPlayed", 0);
@@ -25,7 +25,7 @@ pub fn build_level_dat(world_name: &str, seed: i32, spawn_x: i32, spawn_z: i32) 
     buf.long("Time", 6000); // midday
     buf.long("DayTime", 6000);
     buf.int("SpawnX", spawn_x);
-    buf.int("SpawnY", 64);
+    buf.int("SpawnY", spawn_y);
     buf.int("SpawnZ", spawn_z);
     buf.byte("raining", 0);
     buf.int("rainTime", 100000);

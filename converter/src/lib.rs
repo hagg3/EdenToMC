@@ -71,6 +71,7 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
         &world.header.name,
         world.header.seed,
         0, // spawn at origin (recentered)
+        world.header.player_y as i32,
         0,
     );
 
@@ -162,4 +163,65 @@ fn base64_encode(data: &[u8]) -> String {
         out.push(if chunk.len() > 2 { CHARS[(combined & 0x3F) as usize] as char } else { '=' });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terrain::{TerrainParams, generate};
+    use crate::eden_writer::write_eden_file;
+
+    #[test]
+    fn test_generate_and_write() {
+        let params = TerrainParams {
+            width: 32,
+            depth: 32,
+            seed: 42,
+            base_height: 20,
+            water_amnt: 5, // no water
+        };
+        let world = generate(&params).expect("generate failed");
+        println!("Spawn: ({}, {}, {})", world.meta.spawn_x, world.meta.spawn_y, world.meta.spawn_z);
+        println!("Height range: {}..{}", world.meta.min_height, world.meta.max_height);
+
+        let bytes = write_eden_file(&world, &params);
+        println!("File size: {} bytes", bytes.len());
+
+        // Parse the file back
+        let parsed = crate::eden::parse_world(&bytes).expect("parse failed");
+        println!("Player pos: ({}, {}, {})", parsed.header.player_x, parsed.header.player_y, parsed.header.player_z);
+        println!("Version: {}", parsed.header.version);
+        println!("Columns: {}", parsed.columns.len());
+        println!("Dir offset: {}", parsed.header.directory_offset);
+
+        // Check center column blocks
+        let cx_center = world.meta.spawn_x / 16;
+        let cz_center = world.meta.spawn_z / 16;
+        println!("Center column: ({}, {})", cx_center, cz_center);
+        
+        let col = parsed.columns.iter().find(|c| c.cx == cx_center && c.cz == cz_center);
+        if let Some(col) = col {
+            println!("Found center column!");
+            // Sample blocks at various Y heights
+            use crate::eden::eden_voxel_idx;
+            for y in 0..32usize {
+                let cy = y / 16;
+                let ly = y % 16;
+                let idx = cy * 4096 + eden_voxel_idx(8, 8, ly); // lx=8, lz=8
+                let bt = col.blocks[idx];
+                if bt != 0 {
+                    println!("  y={}: block_type={}", y, bt);
+                }
+            }
+        } else {
+            println!("Center column NOT FOUND!");
+        }
+
+        // Verify version at offset 90
+        use std::io::Read;
+        let v90 = i32::from_le_bytes(bytes[90..94].try_into().unwrap());
+        let v92 = i32::from_le_bytes(bytes[92..96].try_into().unwrap());
+        println!("Version at offset 90: {} (should be 4)", v90);
+        println!("Version at offset 92: {} (should be 0)", v92);
+    }
 }

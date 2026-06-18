@@ -137,7 +137,7 @@ pub fn default_mapping() -> BlockMapping {
     add(1,  7,   0, "none");          // Bedrock
     add(2,  1,   0, "concrete");      // Stone
     add(3,  3,   0, "terracotta");    // Dirt
-    add(4,  24,  2, "none");          // Sand → Smooth Sandstone
+    add(4,  12,  0, "none");          // Sand
     add(5,  18,  0, "none");          // Leaves
     add(6,  17,  0, "none");          // Tree trunk
     add(7,  5,   0, "wool");          // Wood planks
@@ -211,7 +211,7 @@ pub fn default_mapping() -> BlockMapping {
     add(83,  4,   0, "concrete");     // BT Dark Stone
     add(84,  1,   0, "concrete");     // BT Stone
     add(85,  3,   0, "terracotta");   // BT Dirt
-    add(86,  24,  2, "none");         // BT Sand
+    add(86,  12,  0, "none");         // BT Sand
     add(87,  46,  0, "none");         // BT TNT
     add(88,  5,   0, "wool");         // BT Wood
     add(89,  112, 0, "none");         // BT Shingle

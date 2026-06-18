@@ -48,7 +48,6 @@ export default function App() {
   const [genPhase, setGenPhase] = useState<Phase>("idle");
   const [genStatus, setGenStatus] = useState("");
   const [edenBlob, setEdenBlob] = useState<Blob | null>(null);
-  const [genZipBlob, setGenZipBlob] = useState<Blob | null>(null);
   const [terrainStats, setTerrainStats] = useState<TerrainStats | null>(null);
 
   useEffect(() => {
@@ -94,7 +93,7 @@ export default function App() {
   const handleGenerate = async () => {
     if (!wasmRef.current) return;
     setGenPhase("converting"); setGenStatus("Generating terrain…");
-    setEdenBlob(null); setGenZipBlob(null); setTerrainStats(null);
+    setEdenBlob(null); setTerrainStats(null);
     try {
       const params = JSON.stringify({
         width: genWidth, depth: genDepth, seed: genSeed,
@@ -120,26 +119,6 @@ export default function App() {
     triggerDownload(edenBlob, `terrain-${genSeed}.eden`);
   };
 
-  const handleConvertGenerated = async () => {
-    if (!edenBlob || !wasmRef.current || !mapping) return;
-    setGenStatus("Converting to Minecraft…");
-    try {
-      const bytes = new Uint8Array(await edenBlob.arrayBuffer());
-      await new Promise(r => setTimeout(r, 0));
-      const result = wasmRef.current.convert(bytes, JSON.stringify(mapping));
-      const zip = new Blob([new Uint8Array(result)], { type: "application/zip" });
-      setGenZipBlob(zip);
-      setGenStatus(`Minecraft world ready — ${(zip.size / 1024).toFixed(1)} KB zip.`);
-    } catch (e) {
-      setGenPhase("error"); setGenStatus("Error converting: " + String(e));
-    }
-  };
-
-  const handleDownloadMC = () => {
-    if (!genZipBlob) return;
-    triggerDownload(genZipBlob, `terrain-${genSeed}-minecraft.zip`);
-  };
-
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ minHeight: "100vh", padding: "32px 16px", color: "#e2e8f0" }}>
@@ -152,7 +131,7 @@ export default function App() {
           </h1>
           <p style={{ color: "#64748b", marginTop: 8, fontSize: 15 }}>
             Convert <code style={{ color: "#94a3b8" }}>.eden</code> worlds to Minecraft 1.12
-            {" "}or generate new procedural worlds — 100% in your browser.
+            {" "}or generate procedural <code style={{ color: "#94a3b8" }}>.eden</code> worlds — 100% in your browser.
           </p>
         </div>
 
@@ -336,25 +315,11 @@ export default function App() {
                   <StatItem label="Columns" value={`${terrainStats.cols_x}×${terrainStats.cols_z}`} />
                 </div>
 
-                <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ marginTop: 16 }}>
                   <button onClick={handleDownloadEden} style={primaryBtn(false, "#0284c7")}>
                     ⬇ Download .eden
                   </button>
-                  <button
-                    onClick={handleConvertGenerated}
-                    disabled={!wasmReady}
-                    style={primaryBtn(!wasmReady, "#059669")}
-                  >
-                    Convert → Minecraft ZIP
-                  </button>
-                  {genZipBlob && (
-                    <button onClick={handleDownloadMC} style={primaryBtn(false, "#16a34a")}>
-                      ⬇ Download MC ZIP
-                    </button>
-                  )}
                 </div>
-
-                {genZipBlob && <InstallInstructions />}
               </div>
             )}
           </>

@@ -317,12 +317,59 @@ pub fn generate(params: &TerrainParams) -> Result<TerrainWorld, String> {
         }
     }
 
-    let spawn_x = (width / 2) as i32;
-    let spawn_z = (depth / 2) as i32;
-    let spawn_y = clamp(
-        get_top_solid_y(&blocks, spawn_x, spawn_z, width, depth) + 1,
-        1, 62,
-    );
+    // Find a dry-land spawn near the world center.
+    // get_top_solid_y skips water, returning the sand floor — so spawn_y = floor+1 lands
+    // the player *inside* the water body. Search outward until we find a column whose
+    // surface block is directly below air (no water above it).
+    let target_x = (width / 2) as i32;
+    let target_z = (depth / 2) as i32;
+    let max_radius = (width.max(depth) / 4) as i32;
+
+    let (spawn_x, spawn_y, spawn_z) = {
+        let mut found: Option<(i32, i32, i32)> = None;
+        'search: for radius in 0..=max_radius {
+            let r = radius;
+            // Walk the perimeter of the square at distance r (or just center if r==0)
+            let steps: Box<dyn Iterator<Item=(i32,i32)>> = if r == 0 {
+                Box::new(std::iter::once((0i32, 0i32)))
+            } else {
+                Box::new(
+                    (-r..=r).map(move |dx| (dx, -r))
+                    .chain((-r..=r).map(move |dx| (dx, r)))
+                    .chain((-r+1..r).map(move |dz| (-r, dz)))
+                    .chain((-r+1..r).map(move |dz| ( r, dz)))
+                )
+            };
+            for (dx, dz) in steps {
+                let wx = target_x + dx;
+                let wz = target_z + dz;
+                if wx < 1 || wz < 1 || wx >= (width - 1) as i32 || wz >= (depth - 1) as i32 {
+                    continue;
+                }
+                let top_y = get_top_solid_y(&blocks, wx, wz, width, depth);
+                if top_y < 1 || top_y >= 62 { continue; }
+                // Check there is no water block directly above the surface
+                let above_idx = world_idx(wx as usize, (top_y + 1) as usize, wz as usize, depth);
+                if blocks[above_idx].block_type != TYPE_NONE { continue; }
+                found = Some((wx, clamp(top_y + 1, 1, 62), wz));
+                break 'search;
+            }
+        }
+        found.unwrap_or_else(|| {
+            // Fallback: place above the highest occupied block (water surface counts)
+            let top_y = {
+                let mut ty = 0i32;
+                for y in (0..64i32).rev() {
+                    let t = blocks[world_idx(target_x as usize, y as usize, target_z as usize, depth)].block_type;
+                    if t != TYPE_NONE && t != TYPE_FLOWER && t != TYPE_LEAVES {
+                        ty = y; break;
+                    }
+                }
+                ty
+            };
+            (target_x, clamp(top_y + 1, 1, 62), target_z)
+        })
+    };
 
     let meta = TerrainMeta {
         spawn_x, spawn_y, spawn_z,

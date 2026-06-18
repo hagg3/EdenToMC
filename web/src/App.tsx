@@ -33,6 +33,7 @@ export default function App() {
 
   // ── Convert tab state ──────────────────────────────────────────────
   const [file, setFile] = useState<File | null>(null);
+  const [fileBytes, setFileBytes] = useState<Uint8Array | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState("");
   const [zipBlob, setZipBlob] = useState<Blob | null>(null);
@@ -64,16 +65,22 @@ export default function App() {
   }, []);
 
   // ── Convert handlers ─────────────────────────────────────────────────────
-  const handleFile = (f: File) => {
-    setFile(f); setZipBlob(null); setPhase("idle"); setStatus("");
+  const handleFile = async (f: File) => {
+    setFile(f); setFileBytes(null); setZipBlob(null); setPhase("idle"); setStatus("Reading file…");
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      setFileBytes(bytes);
+      setStatus("");
+    } catch (e) {
+      setPhase("error"); setStatus("Error reading file: " + String(e));
+    }
   };
 
   const handleConvert = async () => {
-    if (!file || !wasmRef.current || !mapping) return;
-    setPhase("converting"); setStatus("Reading file…");
+    if (!fileBytes || !wasmRef.current || !mapping) return;
+    setPhase("converting"); setStatus("Converting — this may take a moment for large worlds…");
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      setStatus("Converting — this may take a moment for large worlds…");
+      const bytes = fileBytes;
       await new Promise(r => setTimeout(r, 0));
       const result = wasmRef.current.convert(bytes, JSON.stringify(mapping));
       const blob = new Blob([new Uint8Array(result)], { type: "application/zip" });
@@ -160,8 +167,8 @@ export default function App() {
                   📄 <strong style={{ color: "#e2e8f0" }}>{file.name}</strong>{" "}
                   ({(file.size / 1024).toFixed(1)} KB)
                 </div>
-                <button onClick={handleConvert} disabled={!wasmReady || phase === "converting"}
-                  style={primaryBtn(phase === "converting")}>
+                <button onClick={handleConvert} disabled={!wasmReady || !fileBytes || phase === "converting"}
+                  style={primaryBtn(!wasmReady || !fileBytes || phase === "converting")}>
                   {phase === "converting" ? "Converting…" : "Convert"}
                 </button>
                 {phase === "done" && (

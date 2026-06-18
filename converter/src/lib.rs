@@ -71,6 +71,7 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
         &world.header.name,
         world.header.seed,
         0, // spawn at origin (recentered)
+        world.header.player_y as i32,
         0,
     );
 

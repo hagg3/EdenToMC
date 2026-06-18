@@ -29,7 +29,9 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
 
         let mut sections: Vec<(u8, Vec<u8>, Vec<u8>)> = Vec::new();
 
-        for cy in 0..4usize {
+        // Derive sub-chunk count from actual data (4 for v≤4 / 64-height, 16 for v5+ / 256-height)
+        let num_chunks = col.blocks.len() / 4096;
+        for cy in 0..num_chunks {
             let mut blks = vec![0u8; 4096];
             let mut data = vec![0u8; 2048];
             let mut has_blocks = false;

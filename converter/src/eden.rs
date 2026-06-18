@@ -8,15 +8,17 @@ pub struct EdenHeader {
     pub name: String,
     pub sky_colors: [u8; 16],
     pub directory_offset: u64,
+    /// File format version: ≤4 = 64-block height (4 sub-chunks), 5+ = 256-block height (16 sub-chunks)
+    pub version: i32,
 }
 
 pub struct ChunkColumn {
     pub cx: i32,
     pub cz: i32,
-    /// 4 vertical chunks of 16×16×16, block types
-    pub blocks: Vec<u8>, // len = 4 * 4096
-    /// 4 vertical chunks of 16×16×16, paint bytes
-    pub paints: Vec<u8>, // len = 4 * 4096
+    /// N vertical sub-chunks of 16×16×16, block types (N=4 for v≤4, N=16 for v5+)
+    pub blocks: Vec<u8>, // len = N * 4096
+    /// N vertical sub-chunks of 16×16×16, paint bytes (N=4 for v≤4, N=16 for v5+)
+    pub paints: Vec<u8>, // len = N * 4096
 }
 
 pub struct EdenWorld {
@@ -87,13 +89,15 @@ pub fn parse_world(data: &[u8]) -> Result<EdenWorld, String> {
     };
 
     let name = read_cstr(data, 40, 50);
+    // version at byte 90 (ARM unaligned i32 LE — no struct padding before it)
+    let version = if data.len() >= 94 { read_i32_le(data, 90) } else { 4 };
     let mut sky_colors = [0u8; 16];
     // sky colors at byte 130 (after hash at 94..130)
     if data.len() >= 146 {
         sky_colors.copy_from_slice(&data[130..146]);
     }
 
-    let header = EdenHeader { seed, player_x: px, player_y: py, player_z: pz, name, sky_colors, directory_offset };
+    let header = EdenHeader { seed, player_x: px, player_y: py, player_z: pz, name, sky_colors, directory_offset, version };
 
     let player_chunk_x = (px / 16.0).floor() as i32;
     let player_chunk_z = (pz / 16.0).floor() as i32;
@@ -123,18 +127,22 @@ pub fn parse_world(data: &[u8]) -> Result<EdenWorld, String> {
         return Err("No valid chunk columns found in directory".into());
     }
 
+    // Version 5+ worlds have 256-block height: 16 sub-chunks per column.
+    // Older worlds (v≤4) have 64-block height: 4 sub-chunks per column.
+    let chunks_per_column: usize = if version >= 5 { 16 } else { 4 };
+
     let mut columns = Vec::new();
     for ((cx, cz), offset) in &col_map {
         let off = *offset as usize;
-        // Each column: 4 chunks, each chunk = 4096 blocks + 4096 paints = 8192 bytes
-        let col_size = 4 * 8192;
+        // Each sub-chunk: 4096 blocks + 4096 paints = 8192 bytes
+        let col_size = chunks_per_column * 8192;
         if off + col_size > data.len() {
             continue; // truncated column, skip
         }
         let raw = &data[off..off + col_size];
-        let mut blocks = Vec::with_capacity(4 * 4096);
-        let mut paints = Vec::with_capacity(4 * 4096);
-        for cy in 0..4 {
+        let mut blocks = Vec::with_capacity(chunks_per_column * 4096);
+        let mut paints = Vec::with_capacity(chunks_per_column * 4096);
+        for cy in 0..chunks_per_column {
             let base = cy * 8192;
             blocks.extend_from_slice(&raw[base..base + 4096]);
             paints.extend_from_slice(&raw[base + 4096..base + 8192]);

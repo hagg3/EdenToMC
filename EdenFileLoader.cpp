@@ -45,8 +45,9 @@ int chunkOffsetZ;
 block8 chunk_block_array[CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
 color8 chunk_color_array[CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
 
-#define CHUNKS_PER_COLUMN_IN_FILE 4
 bool EdenFileLoader::readColumn(int cx, int cz) {
+	// Version 5+ worlds have 16 sub-chunks (256-block height); older have 4 (64-block height)
+	int CHUNKS_PER_COLUMN_IN_FILE = (sfh && sfh->version >= 5) ? 16 : 4;
 
 
 	int idx = -1;
@@ -180,6 +181,8 @@ void EdenFileLoader::convertToMinecraft(const char* edenPath, const char* output
 	fread(sfh, sizeof(WorldFileHeader), 1, fp);
 	printf("Converting file: %s (version %d)\n", sfh->name, sfh->version);
 	printf("Chunk directory at: %ld\n", (long)sfh->directory_offset);
+	// Version 5+ worlds have 256-block height (16 sub-chunks); older worlds have 64-block height (4 sub-chunks)
+	int chunks_per_column = (sfh->version >= 5) ? 16 : 4;
 
 	colindexes.clear();
 	this->readDirectory();
@@ -203,15 +206,15 @@ void EdenFileLoader::convertToMinecraft(const char* edenPath, const char* output
 			continue;
 		}
 
-		// Read 4 vertical chunks in this column and assemble 4 sections (Y=0..3)
-		std::vector<std::vector<uint8_t>> sectionsBlocks(4);
-		std::vector<std::vector<uint8_t>> sectionsData(4);
-		for (int s = 0; s < 4; ++s) {
+		// Read vertical chunks in this column (4 for v≤4, 16 for v5+)
+		std::vector<std::vector<uint8_t>> sectionsBlocks(chunks_per_column);
+		std::vector<std::vector<uint8_t>> sectionsData(chunks_per_column);
+		for (int s = 0; s < chunks_per_column; ++s) {
 			sectionsBlocks[s].assign(CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE, 0);
 			sectionsData[s].assign((CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE)/2, 0);
 		}
 
-		for (int cy = 0; cy < 4; cy++) {
+		for (int cy = 0; cy < chunks_per_column; cy++) {
             int nr = fread(chunk_block_array, CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * sizeof(block8), 1, fp);
             if (nr != 1) { printf("read blocks failed %d,%d\n", cx, cz); break; }
             nr = fread(chunk_color_array, CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * sizeof(color8), 1, fp);

@@ -1,0 +1,15 @@
+{
+  "name": "eden-converter",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "eden_converter_bg.wasm",
+    "eden_converter.js",
+    "eden_converter.d.ts"
+  ],
+  "main": "eden_converter.js",
+  "types": "eden_converter.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

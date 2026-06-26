@@ -18,6 +18,11 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
         block_map::default_mapping()
     };
 
+    // Detect gzip-compressed Eden worlds (1F 8B magic).
+    if eden_bytes.len() >= 2 && eden_bytes[0] == 0x1F && eden_bytes[1] == 0x8B {
+        return convert_gz(eden_bytes, mapping);
+    }
+
     // Detect ZIP archives using the zip crate's own parser (reads EOCD from the end
     // of file, handles ZIP32, ZIP64, and files that don't start with PK\x03\x04).
     let is_zip = {
@@ -422,6 +427,197 @@ fn skip_bytes<R: std::io::Read>(reader: &mut R, mut n: usize) -> std::io::Result
         n -= read;
     }
     Ok(())
+}
+
+// ── Gzip streaming support ───────────────────────────────────────────────────
+//
+// Some Eden files are gzip-compressed (1F 8B magic) rather than ZIP-wrapped.
+// We use the same two-pass strategy as the ZIP path:
+//   Pass 1 (gz_read_world_info): stream to directory_offset, read directory only.
+//   Pass 2 (gz_stream_convert): stream columns in file order, convert in-place.
+// Peak WASM memory: gzip input + one column buffer (131 KB) + AnvilArchive output.
+
+fn gz_read_world_info(gz_bytes: &[u8]) -> Result<ZipWorldInfo, String> {
+    use std::io::Read;
+    use flate2::read::GzDecoder;
+
+    let mut decoder = GzDecoder::new(gz_bytes);
+
+    // Read Eden header (228 bytes).
+    let mut hdr = [0u8; 228];
+    decoder.read_exact(&mut hdr)
+        .map_err(|e| format!("Failed to read Eden header from gzip: {}", e))?;
+
+    let seed       = i32::from_le_bytes(hdr[0..4].try_into().unwrap());
+    let player_x   = f32::from_le_bytes(hdr[4..8].try_into().unwrap());
+    let player_y   = f32::from_le_bytes(hdr[8..12].try_into().unwrap());
+    let player_z   = f32::from_le_bytes(hdr[12..16].try_into().unwrap());
+    let dir_off_u64 = u64::from_le_bytes(hdr[32..40].try_into().unwrap());
+    let version    = i32::from_le_bytes(hdr[90..94].try_into().unwrap());
+    let name_bytes = &hdr[40..90];
+    let name_end   = name_bytes.iter().position(|&b| b == 0).unwrap_or(50);
+    let world_name = String::from_utf8_lossy(&name_bytes[..name_end]).into_owned();
+
+    if dir_off_u64 <= 228 {
+        return Err(format!("Invalid directory offset {} in gzip Eden header", dir_off_u64));
+    }
+    let directory_offset = dir_off_u64 as usize;
+
+    let to_skip = directory_offset.saturating_sub(228);
+    skip_bytes(&mut decoder, to_skip)
+        .map_err(|e| format!("Failed to skip to column directory in gzip: {}", e))?;
+
+    // Read only the directory — cap at 4 MiB (enough for 262 K columns / 512×512 world).
+    let mut dir_buf = Vec::new();
+    decoder.by_ref().take(4_194_304_u64)
+        .read_to_end(&mut dir_buf)
+        .map_err(|e| format!("Failed to read column directory from gzip: {}", e))?;
+
+    let mut col_map: std::collections::HashMap<(i32, i32), u64> =
+        std::collections::HashMap::new();
+    let mut pos = 0;
+    while pos + 16 <= dir_buf.len() {
+        let cx  = i32::from_le_bytes(dir_buf[pos..pos+4].try_into().unwrap());
+        let cz  = i32::from_le_bytes(dir_buf[pos+4..pos+8].try_into().unwrap());
+        let off = u64::from_le_bytes(dir_buf[pos+8..pos+16].try_into().unwrap());
+        if off > 0 && (off as usize) < directory_offset {
+            col_map.insert((cx, cz), off);
+        }
+        pos += 16;
+    }
+
+    if col_map.is_empty() {
+        return Err("No valid columns found in gzip Eden world directory".into());
+    }
+
+    let chunks_per_column = {
+        let mut offsets: Vec<u64> = col_map.values().copied().collect();
+        if offsets.len() >= 2 {
+            offsets.sort_unstable();
+            let min_gap = offsets.windows(2)
+                .filter_map(|w| w[1].checked_sub(w[0]).filter(|&g| g > 0))
+                .min()
+                .unwrap_or(131_072);
+            if min_gap < 131_072 { 4 } else { 16 }
+        } else {
+            if version >= 5 { 16 } else { 4 }
+        }
+    };
+
+    let col_size = chunks_per_column * 8192;
+    let columns: Vec<(i32, i32, usize)> = col_map.into_iter()
+        .filter_map(|((cx, cz), off)| {
+            let off = off as usize;
+            if off + col_size <= directory_offset { Some((cx, cz, off)) } else { None }
+        })
+        .collect();
+
+    let player_chunk_x = (player_x / 16.0).floor() as i32;
+    let player_chunk_z = (player_z / 16.0).floor() as i32;
+
+    Ok(ZipWorldInfo { world_name, seed, player_y, player_chunk_x, player_chunk_z,
+                      columns, chunks_per_column })
+}
+
+fn gz_stream_convert(
+    gz_bytes: &[u8],
+    info: &ZipWorldInfo,
+    mapping: &block_map::BlockMapping,
+) -> Result<anvil::AnvilArchive, String> {
+    use std::io::Read;
+    use flate2::read::GzDecoder;
+
+    let mut decoder = GzDecoder::new(gz_bytes);
+    let mut anvil_archive = anvil::AnvilArchive::new();
+    let col_size = info.chunks_per_column * 8192;
+
+    let mut sorted_cols = info.columns.clone();
+    sorted_cols.sort_by_key(|&(_, _, off)| off);
+
+    let mut current_pos: usize = 0;
+    let mut col_buf = vec![0u8; col_size];
+
+    for &(cx, cz, data_offset) in &sorted_cols {
+        if data_offset > current_pos {
+            skip_bytes(&mut decoder, data_offset - current_pos)
+                .map_err(|e| format!("Skip error before column ({}, {}): {}", cx, cz, e))?;
+            current_pos = data_offset;
+        }
+
+        decoder.read_exact(&mut col_buf)
+            .map_err(|e| format!("Read error at column ({}, {}): {}", cx, cz, e))?;
+        current_pos += col_size;
+
+        let out_cx = cx - info.player_chunk_x;
+        let out_cz = cz - info.player_chunk_z;
+        let mut sections: Vec<(u8, Vec<u8>, Vec<u8>)> = Vec::new();
+
+        for cy in 0..info.chunks_per_column {
+            let mut blks = vec![0u8; 4096];
+            let mut data = vec![0u8; 2048];
+            let mut has_blocks = false;
+
+            for ex in 0..16usize {
+                for ez in 0..16usize {
+                    for ey in 0..16usize {
+                        let local_idx = eden::eden_voxel_idx(ex, ez, ey);
+                        let block_type = col_buf[cy * 8192 + local_idx];
+                        let paint_byte = col_buf[cy * 8192 + 4096 + local_idx];
+                        let mc = block_map::resolve(mapping, block_type, paint_byte);
+                        if mc.id == 0 { continue; }
+                        has_blocks = true;
+                        let anvil_idx = eden::anvil_voxel_idx(ex, ez, ey);
+                        blks[anvil_idx] = mc.id;
+                        let nibble_idx = anvil_idx / 2;
+                        if anvil_idx % 2 == 0 {
+                            data[nibble_idx] = (data[nibble_idx] & 0xF0) | (mc.meta & 0x0F);
+                        } else {
+                            data[nibble_idx] = (data[nibble_idx] & 0x0F) | ((mc.meta & 0x0F) << 4);
+                        }
+                    }
+                }
+            }
+
+            if has_blocks { sections.push((cy as u8, blks, data)); }
+        }
+
+        anvil_archive.write_chunk(out_cx, out_cz, sections);
+    }
+
+    Ok(anvil_archive)
+}
+
+fn convert_gz(gz_bytes: &[u8], mapping: block_map::BlockMapping) -> Result<Vec<u8>, JsValue> {
+    let info = gz_read_world_info(gz_bytes)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let archive = gz_stream_convert(gz_bytes, &info, &mapping)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let level_dat = level_dat::build_level_dat(
+        &info.world_name, info.seed, 0, info.player_y as i32, 0,
+    );
+
+    let mut zip_buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut zip_buf);
+        let options = zip::write::FileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("level.dat", options)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        zip.write_all(&level_dat)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        for (name, bytes) in archive.into_files() {
+            let _ = zip.add_directory("region/", options);
+            zip.start_file(&name, options)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            zip.write_all(&bytes)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        }
+        zip.finish().map_err(|e| JsValue::from_str(&e.to_string()))?;
+    }
+
+    Ok(zip_buf.into_inner())
 }
 
 fn base64_encode(data: &[u8]) -> String {

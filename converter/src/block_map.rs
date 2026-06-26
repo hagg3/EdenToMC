@@ -21,6 +21,10 @@ pub struct BlockEntry {
     /// "concrete", "wool", "stained_glass", "terracotta", or "none".
     #[serde(default = "default_painted_family")]
     pub painted_family: String,
+    /// Per-paint-byte overrides (paint byte 1–54 → specific McBlock).
+    /// Takes priority over painted_family for the matching paint byte.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub paint_colors: HashMap<u8, McBlock>,
 }
 
 fn default_painted_family() -> String { "none".into() }
@@ -114,10 +118,16 @@ pub fn resolve(mapping: &BlockMapping, block_type: u8, paint_byte: u8) -> McBloc
         Some(e) => e,
         None => return McBlock::new(1, 0), // stone fallback
     };
-    if paint_byte > 0 && entry.painted_family != "none" {
-        let mc_color = paint_to_mc_color(paint_byte);
-        if let Some(b) = colored_block(&entry.painted_family, mc_color) {
-            return b;
+    if paint_byte > 0 {
+        // Per-color override takes priority over the family mapping.
+        if let Some(mc) = entry.paint_colors.get(&paint_byte) {
+            return *mc;
+        }
+        if entry.painted_family != "none" {
+            let mc_color = paint_to_mc_color(paint_byte);
+            if let Some(b) = colored_block(&entry.painted_family, mc_color) {
+                return b;
+            }
         }
     }
     entry.unpainted
@@ -130,6 +140,7 @@ pub fn default_mapping() -> BlockMapping {
         blocks.insert(id, BlockEntry {
             unpainted: McBlock::new(mc_id, mc_meta),
             painted_family: family.into(),
+            paint_colors: HashMap::new(),
         });
     };
 
@@ -157,26 +168,29 @@ pub fn default_mapping() -> BlockMapping {
     add(21, 85,  0, "none");          // Weave → Oak Fence
     add(22, 48,  0, "none");          // Vine → Mossy Cobblestone
     add(23, 11,  0, "none");          // Lava
-    // Stone ramps (24-27) → Cobblestone Stairs, meta = stair direction
-    add(24, 67, 1, "none");
-    add(25, 67, 0, "none");
-    add(26, 67, 3, "none");
-    add(27, 67, 2, "none");
+    // Ramps → Stairs. Eden ramp direction = high-edge direction (S/W/N/E).
+    // MC stair meta: 0=ascending east, 1=west, 2=south, 3=north (high end matches direction).
+    // Pattern: S→2, W→1, N→3, E→0
+    // Stone ramps (24-27) → Cobblestone Stairs
+    add(24, 67, 2, "none"); // Stone Ramp S
+    add(25, 67, 1, "none"); // Stone Ramp W
+    add(26, 67, 3, "none"); // Stone Ramp N
+    add(27, 67, 0, "none"); // Stone Ramp E
     // Wood ramps (28-31) → Oak Stairs
-    add(28, 53, 1, "none");
-    add(29, 53, 0, "none");
-    add(30, 53, 3, "none");
-    add(31, 53, 2, "none");
+    add(28, 53, 2, "none"); // Wood Ramp S
+    add(29, 53, 1, "none"); // Wood Ramp W
+    add(30, 53, 3, "none"); // Wood Ramp N
+    add(31, 53, 0, "none"); // Wood Ramp E
     // Shingle ramps (32-35) → Nether Brick Stairs
-    add(32, 114, 1, "none");
-    add(33, 114, 0, "none");
-    add(34, 114, 3, "none");
-    add(35, 114, 2, "none");
+    add(32, 114, 2, "none"); // Shingle Ramp S
+    add(33, 114, 1, "none"); // Shingle Ramp W
+    add(34, 114, 3, "none"); // Shingle Ramp N
+    add(35, 114, 0, "none"); // Shingle Ramp E
     // Ice ramps (36-39) → Quartz Stairs
-    add(36, 156, 1, "none");
-    add(37, 156, 0, "none");
-    add(38, 156, 3, "none");
-    add(39, 156, 2, "none");
+    add(36, 156, 2, "none"); // Ice Ramp S
+    add(37, 156, 1, "none"); // Ice Ramp W
+    add(38, 156, 3, "none"); // Ice Ramp N
+    add(39, 156, 0, "none"); // Ice Ramp E
     // Stone sides (40-43) → Cobblestone Wall
     for i in 40u8..=43 { add(i, 139, 0, "none"); }
     // Wood sides (44-47) → Oak Fence

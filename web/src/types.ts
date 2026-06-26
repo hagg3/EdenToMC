@@ -5,11 +5,81 @@ export type PaintedFamily = "none" | "concrete" | "wool" | "stained_glass" | "te
 export interface BlockEntry {
   unpainted: McBlock;
   painted_family: PaintedFamily;
+  /** Per-paint-byte overrides: key = Eden paint byte as string "1"–"54". Takes priority over painted_family. */
+  paint_colors?: Record<string, McBlock>;
 }
 
 export interface BlockMapping {
   blocks: Record<string, BlockEntry>;
 }
+
+/**
+ * Eden paint palette: 54 colors, index 0 = paint byte 1.
+ * Organized as 6 brightness rows × 9 hue columns.
+ * RGB values sourced from PAINT_RGB in eden-world-editor/src-tauri/src/lib.rs.
+ */
+export const EDEN_PAINT_COLORS: { label: string; rgb: [number, number, number] }[] = [
+  // Row 0: pastel (paint bytes 1–9)
+  { label: "Light Red",        rgb: [255, 170, 170] },
+  { label: "Light Orange",     rgb: [255, 233, 170] },
+  { label: "Light Yellow",     rgb: [250, 255, 170] },
+  { label: "Light Cyan-Green", rgb: [170, 255, 191] },
+  { label: "Light Cyan",       rgb: [170, 255, 255] },
+  { label: "Light Blue",       rgb: [170, 191, 255] },
+  { label: "Light Magenta",    rgb: [212, 170, 255] },
+  { label: "Light Pink",       rgb: [255, 170, 233] },
+  { label: "White",            rgb: [255, 255, 255] },
+  // Row 1: medium (paint bytes 10–18)
+  { label: "Medium Red",        rgb: [255,  85,  85] },
+  { label: "Medium Orange",     rgb: [255, 212,  85] },
+  { label: "Medium Yellow",     rgb: [246, 255,  85] },
+  { label: "Medium Cyan-Green", rgb: [ 85, 255, 127] },
+  { label: "Medium Cyan",       rgb: [ 85, 255, 255] },
+  { label: "Medium Blue",       rgb: [ 85, 127, 255] },
+  { label: "Medium Magenta",    rgb: [170,  85, 255] },
+  { label: "Medium Pink",       rgb: [255,  85, 212] },
+  { label: "Light Gray",        rgb: [204, 204, 204] },
+  // Row 2: pure (paint bytes 19–27)
+  { label: "Red",        rgb: [255,   0,   0] },
+  { label: "Orange",     rgb: [255, 191,   0] },
+  { label: "Yellow",     rgb: [242, 255,   0] },
+  { label: "Cyan-Green", rgb: [  0, 255,  63] },
+  { label: "Cyan",       rgb: [  0, 255, 255] },
+  { label: "Blue",       rgb: [  0,  63, 255] },
+  { label: "Magenta",    rgb: [127,   0, 255] },
+  { label: "Pink",       rgb: [255,   0, 191] },
+  { label: "Gray",       rgb: [153, 153, 153] },
+  // Row 3: dark (paint bytes 28–36)
+  { label: "Dark Red",        rgb: [191,   0,   0] },
+  { label: "Dark Orange",     rgb: [191, 143,   0] },
+  { label: "Dark Yellow",     rgb: [181, 191,   0] },
+  { label: "Dark Cyan-Green", rgb: [  0, 191,  47] },
+  { label: "Dark Cyan",       rgb: [  0, 191, 191] },
+  { label: "Dark Blue",       rgb: [  0,  47, 191] },
+  { label: "Dark Magenta",    rgb: [ 95,   0, 191] },
+  { label: "Dark Pink",       rgb: [191,   0, 143] },
+  { label: "Dark Gray",       rgb: [102, 102, 102] },
+  // Row 4: darker (paint bytes 37–45)
+  { label: "Darker Red",        rgb: [127,   0,   0] },
+  { label: "Darker Orange",     rgb: [127,  95,   0] },
+  { label: "Darker Yellow",     rgb: [121, 127,   0] },
+  { label: "Darker Cyan-Green", rgb: [  0, 127,  31] },
+  { label: "Darker Cyan",       rgb: [  0, 127, 127] },
+  { label: "Darker Blue",       rgb: [  0,  31, 127] },
+  { label: "Darker Magenta",    rgb: [ 63,   0, 127] },
+  { label: "Darker Pink",       rgb: [127,   0,  95] },
+  { label: "Charcoal",          rgb: [ 50,  50,  50] },
+  // Row 5: darkest (paint bytes 46–54)
+  { label: "Darkest Red",        rgb: [ 63,   0,   0] },
+  { label: "Darkest Orange",     rgb: [ 63,  47,   0] },
+  { label: "Darkest Yellow",     rgb: [ 60,  63,   0] },
+  { label: "Darkest Cyan-Green", rgb: [  0,  63,  15] },
+  { label: "Darkest Cyan",       rgb: [  0,  63,  63] },
+  { label: "Darkest Blue",       rgb: [  0,  15,  63] },
+  { label: "Darkest Magenta",    rgb: [ 31,   0,  63] },
+  { label: "Darkest Pink",       rgb: [ 63,   0,  47] },
+  { label: "Black",              rgb: [  2,   2,   2] },
+];
 
 export const EDEN_BLOCK_NAMES: Record<number, string> = {
   0: "Air", 1: "Bedrock", 2: "Stone", 3: "Dirt", 4: "Sand",

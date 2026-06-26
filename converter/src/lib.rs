@@ -18,14 +18,11 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
         block_map::default_mapping()
     };
 
-    // Transparently handle ZIP-wrapped .eden files (magic bytes: 50 4B 03 04).
-    // The decompressed buffer must outlive `world` and the conversion loop below.
-    let _decompressed;
-    let eden_bytes: &[u8] = {
-        let cow = decompress_if_zip(eden_bytes).map_err(|e| JsValue::from_str(&e))?;
-        _decompressed = cow;
-        &*_decompressed
-    };
+    // ZIP-wrapped .eden: use two-pass streaming so we never materialise the full
+    // decompressed file (which can be 2+ GB) alongside the ZIP input in WASM memory.
+    if eden_bytes.starts_with(b"PK\x03\x04") {
+        return convert_zip(eden_bytes, mapping);
+    }
 
     let world = eden::parse_world(eden_bytes)
         .map_err(|e| JsValue::from_str(&e))?;
@@ -157,25 +154,248 @@ pub fn generate_world(params_json: &str) -> Result<String, JsValue> {
     Ok(result.to_string())
 }
 
-/// Detect and decompress a ZIP-wrapped .eden file.
-/// Checks for the PK magic (50 4B 03 04); if present, decompresses entry 0 and
-/// returns it as an owned buffer. Otherwise returns a borrowed view of the input.
-fn decompress_if_zip(bytes: &[u8]) -> Result<std::borrow::Cow<[u8]>, String> {
-    if !bytes.starts_with(b"PK\x03\x04") {
-        return Ok(std::borrow::Cow::Borrowed(bytes));
-    }
-    let cursor = std::io::Cursor::new(bytes);
+// ── ZIP streaming support ────────────────────────────────────────────────────
+//
+// Eden files sometimes come as ZIP archives (PK magic 50 4B 03 04).  The naive
+// approach – decompress the whole entry into a Vec<u8> – fails for 2+ GB worlds
+// because the decompressed buffer and the ZIP input sit in WASM memory together,
+// exhausting the 32-bit address space.
+//
+// Instead we use two streaming passes over the ZIP entry:
+//   Pass 1 (zip_read_world_info): reads the 228-byte Eden header, skips forward
+//           to directory_offset, reads only the directory (~hundreds of KB).
+//   Pass 2 (zip_stream_convert): re-opens the entry, streams columns in file
+//           order, converts each in-place, writes to AnvilArchive immediately.
+//
+// Peak WASM memory: ZIP input + one column buffer (131 KB) + AnvilArchive output.
+
+struct ZipWorldInfo {
+    world_name: String,
+    seed: i32,
+    player_y: f32,
+    player_chunk_x: i32,
+    player_chunk_z: i32,
+    /// (cx, cz, byte-offset into decompressed stream)
+    columns: Vec<(i32, i32, usize)>,
+    chunks_per_column: usize,
+}
+
+fn zip_read_world_info(zip_bytes: &[u8]) -> Result<ZipWorldInfo, String> {
+    use std::io::Read;
+    let cursor = std::io::Cursor::new(zip_bytes);
     let mut archive = zip::ZipArchive::new(cursor)
         .map_err(|e| format!("Invalid ZIP archive: {}", e))?;
     if archive.len() == 0 {
         return Err("ZIP archive contains no files".into());
     }
     let mut entry = archive.by_index(0)
-        .map_err(|e| format!("Cannot read ZIP entry: {}", e))?;
-    let mut buf = Vec::new();
-    std::io::Read::read_to_end(&mut entry, &mut buf)
-        .map_err(|e| format!("ZIP decompression failed: {}", e))?;
-    Ok(std::borrow::Cow::Owned(buf))
+        .map_err(|e| format!("Cannot open ZIP entry: {}", e))?;
+
+    let total_size = entry.size(); // decompressed size from ZIP central directory
+
+    // Read Eden header (228 bytes).
+    let mut hdr = [0u8; 228];
+    entry.read_exact(&mut hdr)
+        .map_err(|e| format!("Failed to read Eden header from ZIP: {}", e))?;
+
+    // Parse header fields — same offsets as eden::parse_world.
+    let seed       = i32::from_le_bytes(hdr[0..4].try_into().unwrap());
+    let player_x   = f32::from_le_bytes(hdr[4..8].try_into().unwrap());
+    let player_y   = f32::from_le_bytes(hdr[8..12].try_into().unwrap());
+    let player_z   = f32::from_le_bytes(hdr[12..16].try_into().unwrap());
+    let dir_off_u32 = u32::from_le_bytes(hdr[32..36].try_into().unwrap()) as u64;
+    let dir_off_u64 = u64::from_le_bytes(hdr[32..40].try_into().unwrap());
+    let version    = i32::from_le_bytes(hdr[90..94].try_into().unwrap());
+    let name_bytes = &hdr[40..90];
+    let name_end   = name_bytes.iter().position(|&b| b == 0).unwrap_or(50);
+    let world_name = String::from_utf8_lossy(&name_bytes[..name_end]).into_owned();
+
+    // Choose directory offset (same u32/u64 fallback as eden::parse_world).
+    let directory_offset: usize =
+        if total_size > 0 && dir_off_u64 < total_size && dir_off_u64 > 228 {
+            dir_off_u64 as usize
+        } else {
+            dir_off_u32 as usize
+        };
+
+    // Skip from end of header to start of directory.  Uses a 64 KB stack
+    // buffer so memory is O(1) regardless of how many GB we skip over.
+    let to_skip = directory_offset.saturating_sub(228);
+    skip_bytes(&mut entry, to_skip)
+        .map_err(|e| format!("Failed to skip to column directory: {}", e))?;
+
+    // Read the directory (small: 16 bytes × number of columns).
+    let mut dir_buf = Vec::new();
+    entry.read_to_end(&mut dir_buf)
+        .map_err(|e| format!("Failed to read column directory: {}", e))?;
+
+    // Parse directory entries: [i32 cx, i32 cz, u64 offset] × N.
+    let mut col_map: std::collections::HashMap<(i32, i32), u64> =
+        std::collections::HashMap::new();
+    let mut pos = 0;
+    while pos + 16 <= dir_buf.len() {
+        let cx  = i32::from_le_bytes(dir_buf[pos..pos+4].try_into().unwrap());
+        let cz  = i32::from_le_bytes(dir_buf[pos+4..pos+8].try_into().unwrap());
+        let off = u64::from_le_bytes(dir_buf[pos+8..pos+16].try_into().unwrap());
+        if off > 0 && (off as usize) < directory_offset {
+            col_map.insert((cx, cz), off);
+        }
+        pos += 16;
+    }
+
+    if col_map.is_empty() {
+        return Err("No valid columns found in ZIP Eden world directory".into());
+    }
+
+    // Detect chunks_per_column via min-gap heuristic (same as eden::parse_world).
+    let chunks_per_column = {
+        let mut offsets: Vec<u64> = col_map.values().copied().collect();
+        if offsets.len() >= 2 {
+            offsets.sort_unstable();
+            let min_gap = offsets.windows(2)
+                .filter_map(|w| w[1].checked_sub(w[0]).filter(|&g| g > 0))
+                .min()
+                .unwrap_or(131_072);
+            if min_gap < 131_072 { 4 } else { 16 }
+        } else {
+            if version >= 5 { 16 } else { 4 }
+        }
+    };
+
+    let col_size = chunks_per_column * 8192;
+    let columns: Vec<(i32, i32, usize)> = col_map.into_iter()
+        .filter_map(|((cx, cz), off)| {
+            let off = off as usize;
+            if off + col_size <= directory_offset { Some((cx, cz, off)) } else { None }
+        })
+        .collect();
+
+    let player_chunk_x = (player_x / 16.0).floor() as i32;
+    let player_chunk_z = (player_z / 16.0).floor() as i32;
+
+    Ok(ZipWorldInfo { world_name, seed, player_y, player_chunk_x, player_chunk_z,
+                      columns, chunks_per_column })
+}
+
+fn zip_stream_convert(
+    zip_bytes: &[u8],
+    info: &ZipWorldInfo,
+    mapping: &block_map::BlockMapping,
+) -> Result<anvil::AnvilArchive, String> {
+    use std::io::Read;
+    let cursor = std::io::Cursor::new(zip_bytes);
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| format!("ZIP error on second pass: {}", e))?;
+    let mut entry = archive.by_index(0)
+        .map_err(|e| format!("ZIP entry error on second pass: {}", e))?;
+
+    let mut anvil_archive = anvil::AnvilArchive::new();
+    let col_size = info.chunks_per_column * 8192;
+
+    // Sort by file offset so we only ever move forward through the stream.
+    let mut sorted_cols = info.columns.clone();
+    sorted_cols.sort_by_key(|&(_, _, off)| off);
+
+    let mut current_pos: usize = 0;
+    let mut col_buf = vec![0u8; col_size];
+
+    for &(cx, cz, data_offset) in &sorted_cols {
+        if data_offset > current_pos {
+            skip_bytes(&mut entry, data_offset - current_pos)
+                .map_err(|e| format!("Skip error before column ({}, {}): {}", cx, cz, e))?;
+            current_pos = data_offset;
+        }
+
+        entry.read_exact(&mut col_buf)
+            .map_err(|e| format!("Read error at column ({}, {}): {}", cx, cz, e))?;
+        current_pos += col_size;
+
+        let out_cx = cx - info.player_chunk_x;
+        let out_cz = cz - info.player_chunk_z;
+        let mut sections: Vec<(u8, Vec<u8>, Vec<u8>)> = Vec::new();
+
+        for cy in 0..info.chunks_per_column {
+            let mut blks = vec![0u8; 4096];
+            let mut data = vec![0u8; 2048];
+            let mut has_blocks = false;
+
+            for ex in 0..16usize {
+                for ez in 0..16usize {
+                    for ey in 0..16usize {
+                        let local_idx = eden::eden_voxel_idx(ex, ez, ey);
+                        let block_type = col_buf[cy * 8192 + local_idx];
+                        let paint_byte = col_buf[cy * 8192 + 4096 + local_idx];
+                        let mc = block_map::resolve(mapping, block_type, paint_byte);
+                        if mc.id == 0 { continue; }
+                        has_blocks = true;
+                        let anvil_idx = eden::anvil_voxel_idx(ex, ez, ey);
+                        blks[anvil_idx] = mc.id;
+                        let nibble_idx = anvil_idx / 2;
+                        if anvil_idx % 2 == 0 {
+                            data[nibble_idx] = (data[nibble_idx] & 0xF0) | (mc.meta & 0x0F);
+                        } else {
+                            data[nibble_idx] = (data[nibble_idx] & 0x0F) | ((mc.meta & 0x0F) << 4);
+                        }
+                    }
+                }
+            }
+
+            if has_blocks { sections.push((cy as u8, blks, data)); }
+        }
+
+        anvil_archive.write_chunk(out_cx, out_cz, sections);
+    }
+
+    Ok(anvil_archive)
+}
+
+fn convert_zip(zip_bytes: &[u8], mapping: block_map::BlockMapping) -> Result<Vec<u8>, JsValue> {
+    let info = zip_read_world_info(zip_bytes)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let archive = zip_stream_convert(zip_bytes, &info, &mapping)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let level_dat = level_dat::build_level_dat(
+        &info.world_name, info.seed, 0, info.player_y as i32, 0,
+    );
+
+    let mut zip_buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut zip_buf);
+        let options = zip::write::FileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("level.dat", options)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        zip.write_all(&level_dat)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        for (name, bytes) in archive.into_files() {
+            let _ = zip.add_directory("region/", options);
+            zip.start_file(&name, options)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            zip.write_all(&bytes)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        }
+        zip.finish().map_err(|e| JsValue::from_str(&e.to_string()))?;
+    }
+
+    Ok(zip_buf.into_inner())
+}
+
+/// Read and discard `n` bytes from `reader` using a fixed 64 KB stack buffer.
+/// Memory usage is O(1) regardless of how many bytes are skipped.
+fn skip_bytes<R: std::io::Read>(reader: &mut R, mut n: usize) -> std::io::Result<()> {
+    let mut buf = [0u8; 65536];
+    while n > 0 {
+        let to_read = n.min(buf.len());
+        let read = reader.read(&mut buf[..to_read])?;
+        if read == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof, "truncated stream while skipping"));
+        }
+        n -= read;
+    }
+    Ok(())
 }
 
 fn base64_encode(data: &[u8]) -> String {

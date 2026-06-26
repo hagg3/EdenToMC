@@ -15,10 +15,24 @@ pub struct EdenHeader {
 pub struct ChunkColumn {
     pub cx: i32,
     pub cz: i32,
-    /// N vertical sub-chunks of 16×16×16, block types (N=4 for v≤4, N=16 for v5+)
-    pub blocks: Vec<u8>, // len = N * 4096
-    /// N vertical sub-chunks of 16×16×16, paint bytes (N=4 for v≤4, N=16 for v5+)
-    pub paints: Vec<u8>, // len = N * 4096
+    /// Byte offset into the raw file where this column's interleaved block/paint data starts.
+    /// Layout: [blocks_4096 | paints_4096] repeated chunks_per_column times (8192 bytes each).
+    pub data_offset: usize,
+    /// Number of vertical sub-chunks (4 for v≤4 / 64-height, 16 for v5+ / 256-height)
+    pub chunks_per_column: usize,
+}
+
+impl ChunkColumn {
+    /// Block type byte for sub-chunk `cy`, local voxel index `local_idx`.
+    #[inline]
+    pub fn get_block(&self, data: &[u8], cy: usize, local_idx: usize) -> u8 {
+        data[self.data_offset + cy * 8192 + local_idx]
+    }
+    /// Paint byte for sub-chunk `cy`, local voxel index `local_idx`.
+    #[inline]
+    pub fn get_paint(&self, data: &[u8], cy: usize, local_idx: usize) -> u8 {
+        data[self.data_offset + cy * 8192 + 4096 + local_idx]
+    }
 }
 
 pub struct EdenWorld {
@@ -139,15 +153,9 @@ pub fn parse_world(data: &[u8]) -> Result<EdenWorld, String> {
         if off + col_size > data.len() {
             continue; // truncated column, skip
         }
-        let raw = &data[off..off + col_size];
-        let mut blocks = Vec::with_capacity(chunks_per_column * 4096);
-        let mut paints = Vec::with_capacity(chunks_per_column * 4096);
-        for cy in 0..chunks_per_column {
-            let base = cy * 8192;
-            blocks.extend_from_slice(&raw[base..base + 4096]);
-            paints.extend_from_slice(&raw[base + 4096..base + 8192]);
-        }
-        columns.push(ChunkColumn { cx: *cx, cz: *cz, blocks, paints });
+        // Store only the file offset — no copying. Block/paint data is read on demand
+        // from the original byte slice, avoiding a full second copy in WASM memory.
+        columns.push(ChunkColumn { cx: *cx, cz: *cz, data_offset: off, chunks_per_column });
     }
 
     Ok(EdenWorld { header, columns, player_chunk_x, player_chunk_z })

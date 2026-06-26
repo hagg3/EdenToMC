@@ -29,8 +29,7 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
 
         let mut sections: Vec<(u8, Vec<u8>, Vec<u8>)> = Vec::new();
 
-        // Derive sub-chunk count from actual data (4 for v≤4 / 64-height, 16 for v5+ / 256-height)
-        let num_chunks = col.blocks.len() / 4096;
+        let num_chunks = col.chunks_per_column;
         for cy in 0..num_chunks {
             let mut blks = vec![0u8; 4096];
             let mut data = vec![0u8; 2048];
@@ -39,9 +38,9 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
             for ex in 0..16usize {
                 for ez in 0..16usize {
                     for ey in 0..16usize {
-                        let eden_idx = eden::eden_voxel_idx(ex, ez, ey) + cy * 4096;
-                        let block_type = col.blocks[eden_idx];
-                        let paint_byte = col.paints[eden_idx];
+                        let local_idx = eden::eden_voxel_idx(ex, ez, ey);
+                        let block_type = col.get_block(eden_bytes, cy, local_idx);
+                        let paint_byte = col.get_paint(eden_bytes, cy, local_idx);
                         let mc = block_map::resolve(&mapping, block_type, paint_byte);
                         if mc.id == 0 { continue; }
                         has_blocks = true;
@@ -202,13 +201,11 @@ mod tests {
         let col = parsed.columns.iter().find(|c| c.cx == cx_center && c.cz == cz_center);
         if let Some(col) = col {
             println!("Found center column!");
-            // Sample blocks at various Y heights
             use crate::eden::eden_voxel_idx;
             for y in 0..32usize {
                 let cy = y / 16;
                 let ly = y % 16;
-                let idx = cy * 4096 + eden_voxel_idx(8, 8, ly); // lx=8, lz=8
-                let bt = col.blocks[idx];
+                let bt = col.get_block(&bytes, cy, eden_voxel_idx(8, 8, ly));
                 if bt != 0 {
                     println!("  y={}: block_type={}", y, bt);
                 }

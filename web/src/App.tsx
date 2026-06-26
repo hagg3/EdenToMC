@@ -37,12 +37,37 @@ export default function App() {
 
   const handleFile = async (f: File) => {
     setFile(f); setFileBytes(null); setZipBlob(null); setPhase("idle"); setStatus("Reading file…");
+
+    // Raw .eden files larger than ~2 GB cannot fit in a browser ArrayBuffer, and
+    // even if they could, WASM would OOM duplicating them in linear memory.
+    // ZIP-compressed worlds are fine — their compressed payload is tiny.
+    const TWO_GB = 2 * 1024 * 1024 * 1024;
+    if (f.size > TWO_GB) {
+      try {
+        const peek = new Uint8Array(await f.slice(0, 4).arrayBuffer());
+        const isZip = peek[0] === 0x50 && peek[1] === 0x4B; // PK magic
+        if (!isZip) {
+          setPhase("error");
+          setStatus(
+            `File is ${(f.size / 1e9).toFixed(2)} GB — too large to load uncompressed in-browser. ` +
+            `Please use the ZIP-compressed version of this world (the .eden file exported from the Eden app is usually already compressed).`
+          );
+          return;
+        }
+      } catch { /* fall through; arrayBuffer() will surface the real error */ }
+    }
+
     try {
       const bytes = new Uint8Array(await f.arrayBuffer());
       setFileBytes(bytes);
       setStatus("");
     } catch (e) {
-      setPhase("error"); setStatus("Error reading file: " + String(e));
+      setPhase("error");
+      const msg = String(e);
+      setStatus("Error reading file: " + msg +
+        (msg.includes("NotReadable") || msg.includes("permission")
+          ? " — ensure the file is not being synced by cloud storage or open in another app."
+          : ""));
     }
   };
 

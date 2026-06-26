@@ -15,10 +15,24 @@ pub struct EdenHeader {
 pub struct ChunkColumn {
     pub cx: i32,
     pub cz: i32,
-    /// N vertical sub-chunks of 16×16×16, block types (N=4 for v≤4, N=16 for v5+)
-    pub blocks: Vec<u8>, // len = N * 4096
-    /// N vertical sub-chunks of 16×16×16, paint bytes (N=4 for v≤4, N=16 for v5+)
-    pub paints: Vec<u8>, // len = N * 4096
+    /// Byte offset into the raw file where this column's interleaved block/paint data starts.
+    /// Layout: [blocks_4096 | paints_4096] repeated chunks_per_column times (8192 bytes each).
+    pub data_offset: usize,
+    /// Number of vertical sub-chunks (4 for v≤4 / 64-height, 16 for v5+ / 256-height)
+    pub chunks_per_column: usize,
+}
+
+impl ChunkColumn {
+    /// Block type byte for sub-chunk `cy`, local voxel index `local_idx`.
+    #[inline]
+    pub fn get_block(&self, data: &[u8], cy: usize, local_idx: usize) -> u8 {
+        data[self.data_offset + cy * 8192 + local_idx]
+    }
+    /// Paint byte for sub-chunk `cy`, local voxel index `local_idx`.
+    #[inline]
+    pub fn get_paint(&self, data: &[u8], cy: usize, local_idx: usize) -> u8 {
+        data[self.data_offset + cy * 8192 + 4096 + local_idx]
+    }
 }
 
 pub struct EdenWorld {
@@ -127,9 +141,26 @@ pub fn parse_world(data: &[u8]) -> Result<EdenWorld, String> {
         return Err("No valid chunk columns found in directory".into());
     }
 
-    // Version 5+ worlds have 256-block height: 16 sub-chunks per column.
-    // Older worlds (v≤4) have 64-block height: 4 sub-chunks per column.
-    let chunks_per_column: usize = if version >= 5 { 16 } else { 4 };
+    // Detect sub-chunk count from actual file layout instead of the version field.
+    // Old Eden worlds (≤1.7) may have incorrect or missing version bytes.
+    // A 64-height column is 4 × 8192 = 32 768 bytes; a 256-height column is
+    // 16 × 8192 = 131 072 bytes. The minimum gap between consecutive column
+    // offsets directly identifies which layout is in use — the same heuristic
+    // used by the edenarchive Rust renderer.
+    let chunks_per_column: usize = {
+        let mut offsets: Vec<u64> = col_map.values().copied().collect();
+        if offsets.len() >= 2 {
+            offsets.sort_unstable();
+            let min_gap = offsets.windows(2)
+                .filter_map(|w| w[1].checked_sub(w[0]).filter(|&g| g > 0))
+                .min()
+                .unwrap_or(131_072);
+            if min_gap < 131_072 { 4 } else { 16 }
+        } else {
+            // Single column — fall back to version field
+            if version >= 5 { 16 } else { 4 }
+        }
+    };
 
     let mut columns = Vec::new();
     for ((cx, cz), offset) in &col_map {
@@ -139,15 +170,9 @@ pub fn parse_world(data: &[u8]) -> Result<EdenWorld, String> {
         if off + col_size > data.len() {
             continue; // truncated column, skip
         }
-        let raw = &data[off..off + col_size];
-        let mut blocks = Vec::with_capacity(chunks_per_column * 4096);
-        let mut paints = Vec::with_capacity(chunks_per_column * 4096);
-        for cy in 0..chunks_per_column {
-            let base = cy * 8192;
-            blocks.extend_from_slice(&raw[base..base + 4096]);
-            paints.extend_from_slice(&raw[base + 4096..base + 8192]);
-        }
-        columns.push(ChunkColumn { cx: *cx, cz: *cz, blocks, paints });
+        // Store only the file offset — no copying. Block/paint data is read on demand
+        // from the original byte slice, avoiding a full second copy in WASM memory.
+        columns.push(ChunkColumn { cx: *cx, cz: *cz, data_offset: off, chunks_per_column });
     }
 
     Ok(EdenWorld { header, columns, player_chunk_x, player_chunk_z })

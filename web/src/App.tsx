@@ -107,7 +107,7 @@ export default function App() {
 
         {status && (
           <div style={bannerStyle(
-            phase === "error" ? "#3f1e1e" : phase === "done" ? "#14532d" : "#1e293b",
+            phase === "error" ? "#3f1e1e" : phase === "done" ? "#14532d" : "#0d3d26",
             phase === "error" ? "#f87171" : phase === "done" ? "#4ade80" : "#94a3b8",
           )}>{status}</div>
         )}
@@ -131,7 +131,7 @@ export default function App() {
 
 function InstallInstructions() {
   return (
-    <div style={{ marginTop: 16, background: "#1e293b", borderRadius: 10, padding: 16 }}>
+    <div style={{ marginTop: 16, background: "#14532d", borderRadius: 10, padding: 16 }}>
       <div style={{ fontWeight: 700, marginBottom: 8, color: "#e2e8f0" }}>How to install in Minecraft</div>
       <ol style={{ color: "#94a3b8", fontSize: 13, paddingLeft: 20, lineHeight: 1.9, margin: 0 }}>
         <li>Extract the ZIP — you'll get <code>level.dat</code> and a <code>region/</code> folder.</li>
@@ -154,9 +154,9 @@ function bannerStyle(bg: string, color: string): React.CSSProperties {
   return { marginTop: 16, padding: "10px 14px", borderRadius: 8, background: bg, color, fontSize: 13 };
 }
 
-function primaryBtn(disabled: boolean, bg = "#2563eb"): React.CSSProperties {
+function primaryBtn(disabled: boolean, bg = "#15803d"): React.CSSProperties {
   return {
-    background: disabled ? "#334155" : bg,
+    background: disabled ? "#166534" : bg,
     color: "#f1f5f9", border: "none", borderRadius: 8,
     padding: "10px 20px", fontWeight: 700, fontSize: 14,
     cursor: disabled ? "not-allowed" : "pointer", transition: "background 0.15s",
@@ -164,6 +164,6 @@ function primaryBtn(disabled: boolean, bg = "#2563eb"): React.CSSProperties {
 }
 
 const ghostBtn: React.CSSProperties = {
-  background: "none", border: "1px solid #334155", color: "#94a3b8",
+  background: "none", border: "1px solid #1a6b3a", color: "#86efac",
   borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13,
 };

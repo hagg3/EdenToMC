@@ -12,9 +12,9 @@ interface Props {
 const GROUP_LABELS: [string, number[]][] = [
   ["Core Blocks", [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]],
   ["Ramps", [24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39]],
-  ["Sides / Fences", [40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55]],
+  ["Side Ramps / Wedges", [40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55]],
   ["Special Blocks", [56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81]],
-  ["Expansion Pack", [82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111]],
+  ["Expansion Blocks", [82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111]],
 ];
 
 function PaintOverrideRow({ paintByte, block, onUpdate, onRemove }: {
@@ -30,12 +30,12 @@ function PaintOverrideRow({ paintByte, block, onUpdate, onRemove }: {
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
       <span style={{
         display: "inline-block", width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-        background: `rgb(${r},${g},${b})`, border: "1px solid #334155",
+        background: `rgb(${r},${g},${b})`, border: "1px solid #1a6b3a",
       }} />
-      <span style={{ color: "#64748b", fontSize: 11, minWidth: 100, flexShrink: 0 }}>
+      <span style={{ color: "#4d9970", fontSize: 11, minWidth: 100, flexShrink: 0 }}>
         {paintByte} – {color.label}
       </span>
-      <span style={{ color: "#475569", fontSize: 11 }}>→</span>
+      <span style={{ color: "#3d7a5a", fontSize: 11 }}>→</span>
       <select
         value={sel}
         onChange={e => {
@@ -77,7 +77,7 @@ function AddOverrideRow({ existingKeys, onAdd }: {
   };
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, paddingTop: 6, borderTop: "1px solid #1e293b" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, paddingTop: 6, borderTop: "1px solid #1a6b3a" }}>
       <select
         value={paintByte}
         onChange={e => setPaintByte(Number(e.target.value))}
@@ -88,7 +88,7 @@ function AddOverrideRow({ existingKeys, onAdd }: {
           return <option key={p} value={p}>{p} – {c.label}</option>;
         })}
       </select>
-      <span style={{ color: "#475569", fontSize: 11 }}>→</span>
+      <span style={{ color: "#3d7a5a", fontSize: 11 }}>→</span>
       <select
         value={blockSel}
         onChange={e => setBlockSel(e.target.value)}
@@ -99,7 +99,7 @@ function AddOverrideRow({ existingKeys, onAdd }: {
         ))}
       </select>
       <button onClick={handleAdd} style={{
-        background: "#1d4ed8", color: "#f1f5f9", border: "none", borderRadius: 5,
+        background: "#15803d", color: "#f1f5f9", border: "none", borderRadius: 5,
         padding: "3px 8px", fontSize: 11, cursor: "pointer", fontWeight: 600, flexShrink: 0,
       }}>+ Add</button>
     </div>
@@ -134,9 +134,9 @@ function BlockRow({ edenId, entry, onUpdate }: {
 
   return (
     <>
-      <tr style={{ borderBottom: advancedOpen ? "none" : "1px solid #1e293b" }}>
-        <td style={{ padding: "6px 8px", color: "#94a3b8", fontSize: 12, whiteSpace: "nowrap" }}>
-          <span style={{ color: "#475569", marginRight: 6 }}>{edenId}</span>
+      <tr style={{ borderBottom: advancedOpen ? "none" : "1px solid #1a6b3a" }}>
+        <td style={{ padding: "6px 8px", color: "#86efac", fontSize: 12, whiteSpace: "nowrap" }}>
+          <span style={{ color: "#3d7a5a", marginRight: 6 }}>{edenId}</span>
           {EDEN_BLOCK_NAMES[edenId] ?? `Block ${edenId}`}
         </td>
         <td style={{ padding: "6px 8px" }}>
@@ -158,7 +158,7 @@ function BlockRow({ edenId, entry, onUpdate }: {
             <select
               value={entry.painted_family}
               onChange={e => setPaintedFamily(e.target.value as PaintedFamily)}
-              style={{ ...selectStyle, flex: 1, color: entry.painted_family !== "none" ? "#34d399" : "#64748b" }}
+              style={{ ...selectStyle, flex: 1, color: entry.painted_family !== "none" ? "#34d399" : "#4d9970" }}
             >
               {PAINTED_FAMILIES.map(f => (
                 <option key={f.value} value={f.value}>{f.label}</option>
@@ -168,9 +168,9 @@ function BlockRow({ edenId, entry, onUpdate }: {
               onClick={() => setAdvancedOpen(o => !o)}
               title={advancedOpen ? "Close overrides" : "Add per-color overrides"}
               style={{
-                background: advancedOpen ? "#1e3a5f" : (overrideCount > 0 ? "#1e3a5f" : "#1e293b"),
-                border: `1px solid ${overrideCount > 0 ? "#3b82f6" : "#334155"}`,
-                color: overrideCount > 0 ? "#60a5fa" : "#64748b",
+                background: advancedOpen ? "#166534" : (overrideCount > 0 ? "#166534" : "#14532d"),
+                border: `1px solid ${overrideCount > 0 ? "#22c55e" : "#1a6b3a"}`,
+                color: overrideCount > 0 ? "#4ade80" : "#4d9970",
                 borderRadius: 5, padding: "3px 7px", fontSize: 11,
                 cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
               }}
@@ -181,9 +181,9 @@ function BlockRow({ edenId, entry, onUpdate }: {
         </td>
       </tr>
       {advancedOpen && (
-        <tr style={{ borderBottom: "1px solid #1e293b" }}>
-          <td colSpan={3} style={{ padding: "6px 12px 10px 24px", background: "#0a1220" }}>
-            <div style={{ fontSize: 11, color: "#475569", marginBottom: 4 }}>
+        <tr style={{ borderBottom: "1px solid #1a6b3a" }}>
+          <td colSpan={3} style={{ padding: "6px 12px 10px 24px", background: "#052e16" }}>
+            <div style={{ fontSize: 11, color: "#3d7a5a", marginBottom: 4 }}>
               Per-color overrides — these take priority over the family setting above.
             </div>
             {Object.entries(paintColors)
@@ -210,9 +210,9 @@ function BlockRow({ edenId, entry, onUpdate }: {
 }
 
 const selectStyle: React.CSSProperties = {
-  background: "#0f172a",
+  background: "#0d3d26",
   color: "#e2e8f0",
-  border: "1px solid #334155",
+  border: "1px solid #1a6b3a",
   borderRadius: 6,
   padding: "4px 6px",
   fontSize: 12,
@@ -245,11 +245,11 @@ export function BlockMappingEditor({ mapping, onChange }: Props) {
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
-        <span style={{ color: "#94a3b8", fontSize: 13, flex: 1 }}>
+        <span style={{ color: "#86efac", fontSize: 13, flex: 1 }}>
           Customise how each Eden block maps to Minecraft. Use ⚙ for per-color overrides.
         </span>
-        <button onClick={exportJson} style={btnStyle("#1d4ed8")}>Export JSON</button>
-        <label style={{ ...btnStyle("#374151"), cursor: "pointer" }}>
+        <button onClick={exportJson} style={btnStyle("#15803d")}>Export JSON</button>
+        <label style={{ ...btnStyle("#14532d"), cursor: "pointer" }}>
           Import JSON
           <input type="file" accept=".json" style={{ display: "none" }} onChange={importJson} />
         </label>
@@ -258,22 +258,22 @@ export function BlockMappingEditor({ mapping, onChange }: Props) {
       {GROUP_LABELS.map(([label, ids]) => {
         const open = openGroups[label] ?? false;
         return (
-          <div key={label} style={{ marginBottom: 8, border: "1px solid #1e293b", borderRadius: 8, overflow: "hidden" }}>
+          <div key={label} style={{ marginBottom: 8, border: "1px solid #1a6b3a", borderRadius: 8, overflow: "hidden" }}>
             <button
               onClick={() => setOpenGroups(g => ({ ...g, [label]: !open }))}
-              style={{ width: "100%", textAlign: "left", padding: "10px 14px", background: "#1e293b",
+              style={{ width: "100%", textAlign: "left", padding: "10px 14px", background: "#14532d",
                 border: "none", color: "#e2e8f0", fontSize: 13, fontWeight: 600, cursor: "pointer",
                 display: "flex", justifyContent: "space-between" }}
             >
-              {label} <span style={{ color: "#64748b" }}>{open ? "▲" : "▼"}</span>
+              {label} <span style={{ color: "#4d9970" }}>{open ? "▲" : "▼"}</span>
             </button>
             {open && (
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
-                  <tr style={{ background: "#0f172a" }}>
+                  <tr style={{ background: "#0d3d26" }}>
                     <th style={thStyle}>Eden Block</th>
-                    <th style={thStyle}>Unpainted → MC Block</th>
-                    <th style={thStyle}>When Painted →</th>
+                    <th style={thStyle}>MC block (unpainted)</th>
+                    <th style={thStyle}>MC block (if painted)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -294,7 +294,7 @@ export function BlockMappingEditor({ mapping, onChange }: Props) {
 
 const thStyle: React.CSSProperties = {
   padding: "6px 8px", textAlign: "left", fontSize: 11,
-  color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
+  color: "#4d9970", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
 };
 
 function btnStyle(bg: string): React.CSSProperties {

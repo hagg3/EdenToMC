@@ -24,12 +24,12 @@ export function DropZone({ onFile, disabled }: Props) {
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
       style={{
-        border: `2px dashed ${dragging ? "#60a5fa" : "#334155"}`,
+        border: `2px dashed ${dragging ? "#4ade80" : "#1a6b3a"}`,
         borderRadius: 12,
         padding: "48px 32px",
         textAlign: "center",
         cursor: disabled ? "not-allowed" : "pointer",
-        background: dragging ? "#1e3a5f" : "#1e293b",
+        background: dragging ? "#166534" : "#14532d",
         transition: "all 0.15s",
         opacity: disabled ? 0.5 : 1,
       }}

@@ -18,15 +18,12 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
         block_map::default_mapping()
     };
 
-    // ZIP-wrapped .eden: detect by PK\x03\x04 magic OR by scanning for the EOCD
-    // signature (PK\x05\x06) near the end of file.  The EOCD scan catches
-    // self-extracting archives and other ZIP variants that don't open with PK\x03\x04.
-    let is_zip = eden_bytes.starts_with(b"PK\x03\x04")
-        || (eden_bytes.len() >= 22 && {
-            // ZIP spec allows up to 64 KB of comment after EOCD; scan accordingly.
-            let start = eden_bytes.len().saturating_sub(65_558);
-            eden_bytes[start..].windows(4).any(|w| w == b"PK\x05\x06")
-        });
+    // Detect ZIP archives using the zip crate's own parser (reads EOCD from the end
+    // of file, handles ZIP32, ZIP64, and files that don't start with PK\x03\x04).
+    let is_zip = {
+        let cursor = std::io::Cursor::new(eden_bytes);
+        zip::ZipArchive::new(cursor).map(|a| a.len() > 0).unwrap_or(false)
+    };
     if is_zip {
         return convert_zip(eden_bytes, mapping);
     }

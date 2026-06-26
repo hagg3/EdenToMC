@@ -224,9 +224,18 @@ fn zip_read_world_info(zip_bytes: &[u8]) -> Result<ZipWorldInfo, String> {
     skip_bytes(&mut entry, to_skip)
         .map_err(|e| format!("Failed to skip to column directory: {}", e))?;
 
-    // Read the directory (small: 16 bytes × number of columns).
+    // Read ONLY the directory portion — cap at 4 MiB (enough for ~262 K columns).
+    // Using read_to_end here would materialise the remainder of the decompressed
+    // stream (up to 3+ GB for a world whose directory sits early in the file),
+    // causing an out-of-memory panic in WASM.
+    let dir_read_limit: u64 = if total_size > 0 && total_size > directory_offset as u64 {
+        (total_size - directory_offset as u64).min(4_194_304) // ≤ 4 MiB
+    } else {
+        4_194_304 // unknown total size: cap defensively
+    };
     let mut dir_buf = Vec::new();
-    entry.read_to_end(&mut dir_buf)
+    entry.by_ref().take(dir_read_limit)
+        .read_to_end(&mut dir_buf)
         .map_err(|e| format!("Failed to read column directory: {}", e))?;
 
     // Parse directory entries: [i32 cx, i32 cz, u64 offset] × N.
@@ -237,6 +246,8 @@ fn zip_read_world_info(zip_bytes: &[u8]) -> Result<ZipWorldInfo, String> {
         let cx  = i32::from_le_bytes(dir_buf[pos..pos+4].try_into().unwrap());
         let cz  = i32::from_le_bytes(dir_buf[pos+4..pos+8].try_into().unwrap());
         let off = u64::from_le_bytes(dir_buf[pos+8..pos+16].try_into().unwrap());
+        // Accept any column whose data fits before the directory.
+        // (Column data always precedes the directory in valid Eden files.)
         if off > 0 && (off as usize) < directory_offset {
             col_map.insert((cx, cz), off);
         }
@@ -263,10 +274,13 @@ fn zip_read_world_info(zip_bytes: &[u8]) -> Result<ZipWorldInfo, String> {
     };
 
     let col_size = chunks_per_column * 8192;
+    // Upper bound for column data: either the directory start (columns always
+    // precede the directory) or, if total_size is known, the full stream length.
+    let data_upper = if total_size > 0 { total_size as usize } else { directory_offset };
     let columns: Vec<(i32, i32, usize)> = col_map.into_iter()
         .filter_map(|((cx, cz), off)| {
             let off = off as usize;
-            if off + col_size <= directory_offset { Some((cx, cz, off)) } else { None }
+            if off + col_size <= data_upper { Some((cx, cz, off)) } else { None }
         })
         .collect();
 

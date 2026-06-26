@@ -141,9 +141,26 @@ pub fn parse_world(data: &[u8]) -> Result<EdenWorld, String> {
         return Err("No valid chunk columns found in directory".into());
     }
 
-    // Version 5+ worlds have 256-block height: 16 sub-chunks per column.
-    // Older worlds (v≤4) have 64-block height: 4 sub-chunks per column.
-    let chunks_per_column: usize = if version >= 5 { 16 } else { 4 };
+    // Detect sub-chunk count from actual file layout instead of the version field.
+    // Old Eden worlds (≤1.7) may have incorrect or missing version bytes.
+    // A 64-height column is 4 × 8192 = 32 768 bytes; a 256-height column is
+    // 16 × 8192 = 131 072 bytes. The minimum gap between consecutive column
+    // offsets directly identifies which layout is in use — the same heuristic
+    // used by the edenarchive Rust renderer.
+    let chunks_per_column: usize = {
+        let mut offsets: Vec<u64> = col_map.values().copied().collect();
+        if offsets.len() >= 2 {
+            offsets.sort_unstable();
+            let min_gap = offsets.windows(2)
+                .filter_map(|w| w[1].checked_sub(w[0]).filter(|&g| g > 0))
+                .min()
+                .unwrap_or(131_072);
+            if min_gap < 131_072 { 4 } else { 16 }
+        } else {
+            // Single column — fall back to version field
+            if version >= 5 { 16 } else { 4 }
+        }
+    };
 
     let mut columns = Vec::new();
     for ((cx, cz), offset) in &col_map {

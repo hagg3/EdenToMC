@@ -18,6 +18,15 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
         block_map::default_mapping()
     };
 
+    // Transparently handle ZIP-wrapped .eden files (magic bytes: 50 4B 03 04).
+    // The decompressed buffer must outlive `world` and the conversion loop below.
+    let _decompressed;
+    let eden_bytes: &[u8] = {
+        let cow = decompress_if_zip(eden_bytes).map_err(|e| JsValue::from_str(&e))?;
+        _decompressed = cow;
+        &*_decompressed
+    };
+
     let world = eden::parse_world(eden_bytes)
         .map_err(|e| JsValue::from_str(&e))?;
 
@@ -146,6 +155,27 @@ pub fn generate_world(params_json: &str) -> Result<String, JsValue> {
     });
 
     Ok(result.to_string())
+}
+
+/// Detect and decompress a ZIP-wrapped .eden file.
+/// Checks for the PK magic (50 4B 03 04); if present, decompresses entry 0 and
+/// returns it as an owned buffer. Otherwise returns a borrowed view of the input.
+fn decompress_if_zip(bytes: &[u8]) -> Result<std::borrow::Cow<[u8]>, String> {
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return Ok(std::borrow::Cow::Borrowed(bytes));
+    }
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| format!("Invalid ZIP archive: {}", e))?;
+    if archive.len() == 0 {
+        return Err("ZIP archive contains no files".into());
+    }
+    let mut entry = archive.by_index(0)
+        .map_err(|e| format!("Cannot read ZIP entry: {}", e))?;
+    let mut buf = Vec::new();
+    std::io::Read::read_to_end(&mut entry, &mut buf)
+        .map_err(|e| format!("ZIP decompression failed: {}", e))?;
+    Ok(std::borrow::Cow::Owned(buf))
 }
 
 fn base64_encode(data: &[u8]) -> String {

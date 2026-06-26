@@ -18,14 +18,29 @@ pub fn convert(eden_bytes: &[u8], mapping_json: Option<String>) -> Result<Vec<u8
         block_map::default_mapping()
     };
 
-    // ZIP-wrapped .eden: use two-pass streaming so we never materialise the full
-    // decompressed file (which can be 2+ GB) alongside the ZIP input in WASM memory.
-    if eden_bytes.starts_with(b"PK\x03\x04") {
+    // ZIP-wrapped .eden: detect by PK\x03\x04 magic OR by scanning for the EOCD
+    // signature (PK\x05\x06) near the end of file.  The EOCD scan catches
+    // self-extracting archives and other ZIP variants that don't open with PK\x03\x04.
+    let is_zip = eden_bytes.starts_with(b"PK\x03\x04")
+        || (eden_bytes.len() >= 22 && {
+            // ZIP spec allows up to 64 KB of comment after EOCD; scan accordingly.
+            let start = eden_bytes.len().saturating_sub(65_558);
+            eden_bytes[start..].windows(4).any(|w| w == b"PK\x05\x06")
+        });
+    if is_zip {
         return convert_zip(eden_bytes, mapping);
     }
 
     let world = eden::parse_world(eden_bytes)
-        .map_err(|e| JsValue::from_str(&e))?;
+        .map_err(|e| {
+            // Include the first 8 bytes as hex to help diagnose unknown formats
+            // (gzip = 1F 8B, zlib = 78 9C/DA/01, raw Eden = 4-byte LE seed).
+            let hex: String = eden_bytes.iter().take(8)
+                .map(|b| format!("{:02X}", b))
+                .collect::<Vec<_>>()
+                .join(" ");
+            JsValue::from_str(&format!("{} [file header: {}]", e, hex))
+        })?;
 
     let mut archive = anvil::AnvilArchive::new();
 

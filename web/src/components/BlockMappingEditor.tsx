@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
-  BlockMapping, BlockEntry, PaintedFamily,
-  EDEN_BLOCK_NAMES, MC_BLOCK_OPTIONS, PAINTED_FAMILIES,
+  BlockMapping, BlockEntry, McBlock, PaintedFamily,
+  EDEN_BLOCK_NAMES, MC_BLOCK_OPTIONS, PAINTED_FAMILIES, EDEN_PAINT_COLORS,
 } from "../types";
 
 interface Props {
@@ -17,50 +17,195 @@ const GROUP_LABELS: [string, number[]][] = [
   ["Expansion Pack", [82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111]],
 ];
 
+function PaintOverrideRow({ paintByte, block, onUpdate, onRemove }: {
+  paintByte: number;
+  block: McBlock;
+  onUpdate: (b: McBlock) => void;
+  onRemove: () => void;
+}) {
+  const color = EDEN_PAINT_COLORS[paintByte - 1];
+  const [r, g, b] = color.rgb;
+  const sel = `${block.id}:${block.meta}`;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+      <span style={{
+        display: "inline-block", width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+        background: `rgb(${r},${g},${b})`, border: "1px solid #334155",
+      }} />
+      <span style={{ color: "#64748b", fontSize: 11, minWidth: 100, flexShrink: 0 }}>
+        {paintByte} – {color.label}
+      </span>
+      <span style={{ color: "#475569", fontSize: 11 }}>→</span>
+      <select
+        value={sel}
+        onChange={e => {
+          const [id, meta] = e.target.value.split(":").map(Number);
+          onUpdate({ id, meta });
+        }}
+        style={{ ...selectStyle, flex: 1 }}
+      >
+        {MC_BLOCK_OPTIONS.map(o => (
+          <option key={`${o.id}:${o.meta}`} value={`${o.id}:${o.meta}`}>{o.label}</option>
+        ))}
+      </select>
+      <button onClick={onRemove} style={{
+        background: "none", border: "none", color: "#ef4444", cursor: "pointer",
+        fontSize: 14, padding: "0 2px", lineHeight: 1, flexShrink: 0,
+      }}>✕</button>
+    </div>
+  );
+}
+
+function AddOverrideRow({ existingKeys, onAdd }: {
+  existingKeys: Set<number>;
+  onAdd: (paintByte: number, block: McBlock) => void;
+}) {
+  const [paintByte, setPaintByte] = useState<number>(() => {
+    for (let i = 1; i <= 54; i++) if (!existingKeys.has(i)) return i;
+    return 1;
+  });
+  const [blockSel, setBlockSel] = useState("1:0");
+
+  const availablePaints = Array.from({ length: 54 }, (_, i) => i + 1).filter(p => !existingKeys.has(p));
+  if (availablePaints.length === 0) return null;
+
+  const handleAdd = () => {
+    const [id, meta] = blockSel.split(":").map(Number);
+    onAdd(paintByte, { id, meta });
+    const next = availablePaints.find(p => p !== paintByte && !existingKeys.has(p));
+    if (next) setPaintByte(next);
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, paddingTop: 6, borderTop: "1px solid #1e293b" }}>
+      <select
+        value={paintByte}
+        onChange={e => setPaintByte(Number(e.target.value))}
+        style={{ ...selectStyle, width: 160, flexShrink: 0 }}
+      >
+        {availablePaints.map(p => {
+          const c = EDEN_PAINT_COLORS[p - 1];
+          return <option key={p} value={p}>{p} – {c.label}</option>;
+        })}
+      </select>
+      <span style={{ color: "#475569", fontSize: 11 }}>→</span>
+      <select
+        value={blockSel}
+        onChange={e => setBlockSel(e.target.value)}
+        style={{ ...selectStyle, flex: 1 }}
+      >
+        {MC_BLOCK_OPTIONS.map(o => (
+          <option key={`${o.id}:${o.meta}`} value={`${o.id}:${o.meta}`}>{o.label}</option>
+        ))}
+      </select>
+      <button onClick={handleAdd} style={{
+        background: "#1d4ed8", color: "#f1f5f9", border: "none", borderRadius: 5,
+        padding: "3px 8px", fontSize: 11, cursor: "pointer", fontWeight: 600, flexShrink: 0,
+      }}>+ Add</button>
+    </div>
+  );
+}
+
 function BlockRow({ edenId, entry, onUpdate }: {
   edenId: number;
   entry: BlockEntry;
   onUpdate: (e: BlockEntry) => void;
 }) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
   const setUnpainted = (id: number, meta: number) =>
     onUpdate({ ...entry, unpainted: { id, meta } });
   const setPaintedFamily = (f: PaintedFamily) =>
     onUpdate({ ...entry, painted_family: f });
 
+  const paintColors = entry.paint_colors ?? {};
+  const overrideCount = Object.keys(paintColors).length;
+
+  const setOverride = (paintByte: number, block: McBlock) => {
+    onUpdate({ ...entry, paint_colors: { ...paintColors, [String(paintByte)]: block } });
+  };
+  const removeOverride = (paintByte: number) => {
+    const next = { ...paintColors };
+    delete next[String(paintByte)];
+    onUpdate({ ...entry, paint_colors: Object.keys(next).length > 0 ? next : undefined });
+  };
+
   const sel = `${entry.unpainted.id}:${entry.unpainted.meta}`;
 
   return (
-    <tr style={{ borderBottom: "1px solid #1e293b" }}>
-      <td style={{ padding: "6px 8px", color: "#94a3b8", fontSize: 12, whiteSpace: "nowrap" }}>
-        <span style={{ color: "#475569", marginRight: 6 }}>{edenId}</span>
-        {EDEN_BLOCK_NAMES[edenId] ?? `Block ${edenId}`}
-      </td>
-      <td style={{ padding: "6px 8px" }}>
-        <select
-          value={sel}
-          onChange={e => {
-            const [id, meta] = e.target.value.split(":").map(Number);
-            setUnpainted(id, meta);
-          }}
-          style={selectStyle}
-        >
-          {MC_BLOCK_OPTIONS.map(o => (
-            <option key={`${o.id}:${o.meta}`} value={`${o.id}:${o.meta}`}>{o.label}</option>
-          ))}
-        </select>
-      </td>
-      <td style={{ padding: "6px 8px" }}>
-        <select
-          value={entry.painted_family}
-          onChange={e => setPaintedFamily(e.target.value as PaintedFamily)}
-          style={{ ...selectStyle, color: entry.painted_family !== "none" ? "#34d399" : "#64748b" }}
-        >
-          {PAINTED_FAMILIES.map(f => (
-            <option key={f.value} value={f.value}>{f.label}</option>
-          ))}
-        </select>
-      </td>
-    </tr>
+    <>
+      <tr style={{ borderBottom: advancedOpen ? "none" : "1px solid #1e293b" }}>
+        <td style={{ padding: "6px 8px", color: "#94a3b8", fontSize: 12, whiteSpace: "nowrap" }}>
+          <span style={{ color: "#475569", marginRight: 6 }}>{edenId}</span>
+          {EDEN_BLOCK_NAMES[edenId] ?? `Block ${edenId}`}
+        </td>
+        <td style={{ padding: "6px 8px" }}>
+          <select
+            value={sel}
+            onChange={e => {
+              const [id, meta] = e.target.value.split(":").map(Number);
+              setUnpainted(id, meta);
+            }}
+            style={selectStyle}
+          >
+            {MC_BLOCK_OPTIONS.map(o => (
+              <option key={`${o.id}:${o.meta}`} value={`${o.id}:${o.meta}`}>{o.label}</option>
+            ))}
+          </select>
+        </td>
+        <td style={{ padding: "6px 8px" }}>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <select
+              value={entry.painted_family}
+              onChange={e => setPaintedFamily(e.target.value as PaintedFamily)}
+              style={{ ...selectStyle, flex: 1, color: entry.painted_family !== "none" ? "#34d399" : "#64748b" }}
+            >
+              {PAINTED_FAMILIES.map(f => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => setAdvancedOpen(o => !o)}
+              title={advancedOpen ? "Close overrides" : "Add per-color overrides"}
+              style={{
+                background: advancedOpen ? "#1e3a5f" : (overrideCount > 0 ? "#1e3a5f" : "#1e293b"),
+                border: `1px solid ${overrideCount > 0 ? "#3b82f6" : "#334155"}`,
+                color: overrideCount > 0 ? "#60a5fa" : "#64748b",
+                borderRadius: 5, padding: "3px 7px", fontSize: 11,
+                cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+              }}
+            >
+              {advancedOpen ? "▲" : "⚙"}{overrideCount > 0 ? ` ${overrideCount}` : ""}
+            </button>
+          </div>
+        </td>
+      </tr>
+      {advancedOpen && (
+        <tr style={{ borderBottom: "1px solid #1e293b" }}>
+          <td colSpan={3} style={{ padding: "6px 12px 10px 24px", background: "#0a1220" }}>
+            <div style={{ fontSize: 11, color: "#475569", marginBottom: 4 }}>
+              Per-color overrides — these take priority over the family setting above.
+            </div>
+            {Object.entries(paintColors)
+              .map(([k, v]) => ({ paintByte: Number(k), block: v }))
+              .sort((a, b) => a.paintByte - b.paintByte)
+              .map(({ paintByte, block }) => (
+                <PaintOverrideRow
+                  key={paintByte}
+                  paintByte={paintByte}
+                  block={block}
+                  onUpdate={b => setOverride(paintByte, b)}
+                  onRemove={() => removeOverride(paintByte)}
+                />
+              ))}
+            <AddOverrideRow
+              existingKeys={new Set(Object.keys(paintColors).map(Number))}
+              onAdd={setOverride}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -101,7 +246,7 @@ export function BlockMappingEditor({ mapping, onChange }: Props) {
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
         <span style={{ color: "#94a3b8", fontSize: 13, flex: 1 }}>
-          Customise how each Eden block maps to Minecraft.
+          Customise how each Eden block maps to Minecraft. Use ⚙ for per-color overrides.
         </span>
         <button onClick={exportJson} style={btnStyle("#1d4ed8")}>Export JSON</button>
         <label style={{ ...btnStyle("#374151"), cursor: "pointer" }}>
